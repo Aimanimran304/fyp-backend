@@ -1,57 +1,34 @@
 import mongoose from "mongoose";
-import bcrypt from "bcryptjs";
-import ROLES from "../config/roles.js";
 
 const userSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: [true, "Name is required"],
+      required: true,
     },
     email: {
       type: String,
-      required: [true, "Email is required"],
+      required: true,
       unique: true,
-      lowercase: true,
+      lowercase: true,   // 🔥 important
+      trim: true,
     },
     password: {
       type: String,
-      required: [true, "Password is required"],
-      minlength: 6,
+      required: true,
+      select: false,     // 🔥 security
     },
     role: {
       type: String,
-      enum: [ROLES.ADMIN, ROLES.STAFF, ROLES.CUSTOMER],
-      default: ROLES.CUSTOMER,
+      enum: ["Admin", "Customer", "Chef"],
+      default: "Customer",
     },
     allergyProfile: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "AllergyProfile",
     },
-    createdAt: {
-      type: Date,
-      default: Date.now,
-    },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-// Password hashing before save
-userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) {
-    next();
-  }
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
-  next();
-});
-
-// Password match method
-userSchema.methods.matchPassword = async function (enteredPassword) {
-  return await bcrypt.compare(enteredPassword, this.password);
-};
-
-const User = mongoose.model("User", userSchema);
-export default User;
+export default mongoose.model("User", userSchema);

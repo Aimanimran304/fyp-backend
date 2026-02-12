@@ -2,12 +2,14 @@ import Order from "../models/Order.js";
 import MenuItem from "../models/MenuItem.js";
 import AllergyProfile from "../models/AllergyProfile.js";
 
-// @desc    Place new order
-// @route   POST /api/orders
-// @access  Customer
+/* ===============================
+   PLACE ORDER
+   POST /api/orders
+   Customer
+================================ */
 export const placeOrder = async (req, res, next) => {
   try {
-    const { items } = req.body; 
+    const { items } = req.body;
     // items = [{ menuItemId, quantity }]
 
     if (!items || items.length === 0) {
@@ -19,7 +21,7 @@ export const placeOrder = async (req, res, next) => {
       user: req.user._id,
     });
 
-    for (let item of items) {
+    for (const item of items) {
       const menuItem = await MenuItem.findById(item.menuItemId);
 
       if (!menuItem) {
@@ -33,7 +35,7 @@ export const placeOrder = async (req, res, next) => {
         )
       ) {
         return res.status(400).json({
-          message: `Allergy alert! ${menuItem.name} contains allergens.`,
+          message: `Allergy alert! ${menuItem.name} contains allergens`,
         });
       }
     }
@@ -50,15 +52,15 @@ export const placeOrder = async (req, res, next) => {
   }
 };
 
-// @desc    Get logged-in user orders
-// @route   GET /api/orders/my
-// @access  Customer
+/* ===============================
+   GET MY ORDERS
+   GET /api/orders/my
+   Customer
+================================ */
 export const getMyOrders = async (req, res, next) => {
   try {
-    const orders = await Order.find({ user: req.user._id }).populate(
-      "items.menuItemId",
-      "name price"
-    );
+    const orders = await Order.find({ user: req.user._id })
+      .populate("items.menuItemId", "name price");
 
     res.status(200).json(orders);
   } catch (error) {
@@ -66,9 +68,11 @@ export const getMyOrders = async (req, res, next) => {
   }
 };
 
-// @desc    Get all orders (Admin / Staff)
-// @route   GET /api/orders
-// @access  Admin / Staff
+/* ===============================
+   GET ALL ORDERS
+   GET /api/orders
+   Admin / Staff
+================================ */
 export const getAllOrders = async (req, res, next) => {
   try {
     const orders = await Order.find()
@@ -76,6 +80,33 @@ export const getAllOrders = async (req, res, next) => {
       .populate("items.menuItemId", "name price");
 
     res.status(200).json(orders);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* ===============================
+   UPDATE ORDER STATUS
+   PUT /api/orders/:id
+   Admin / Staff
+================================ */
+export const updateOrderStatus = async (req, res, next) => {
+  try {
+    const { status } = req.body;
+
+    const order = await Order.findById(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    order.status = status || order.status;
+    await order.save();
+
+    res.status(200).json({
+      message: "Order status updated successfully",
+      order,
+    });
   } catch (error) {
     next(error);
   }

@@ -1,9 +1,9 @@
 import User from "../models/User.js";
 import AllergyProfile from "../models/AllergyProfile.js";
 
-// @desc    Get logged-in user profile
-// @route   GET /api/users/profile
-// @access  Private
+// ===============================
+// GET USER PROFILE
+// ===============================
 export const getUserProfile = async (req, res, next) => {
   try {
     const user = await User.findById(req.user.id)
@@ -20,10 +20,35 @@ export const getUserProfile = async (req, res, next) => {
   }
 };
 
-// @desc    Add or Update Allergy Profile
-// @route   POST /api/users/allergy
-// @access  Private
-export const addOrUpdateAllergyProfile = async (req, res, next) => {
+// ===============================
+// UPDATE USER PROFILE
+// ===============================
+export const updateUserProfile = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    user.name = req.body.name || user.name;
+    user.email = req.body.email || user.email;
+
+    await user.save();
+
+    res.status(200).json({
+      message: "Profile updated successfully",
+      user,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ===============================
+// ADD / UPDATE ALLERGY PROFILE
+// ===============================
+export const addAllergyProfile = async (req, res, next) => {
   try {
     const { allergies, severityLevel, notes } = req.body;
 
@@ -53,6 +78,27 @@ export const addOrUpdateAllergyProfile = async (req, res, next) => {
       message: "Allergy profile saved successfully",
       allergyProfile,
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ===============================
+// GET ALLERGY PROFILE
+// ===============================
+export const getAllergyProfile = async (req, res, next) => {
+  try {
+    const profile = await AllergyProfile.findOne({
+      user: req.user.id,
+    });
+
+    if (!profile) {
+      return res.status(404).json({
+        message: "Allergy profile not found",
+      });
+    }
+
+    res.status(200).json(profile);
   } catch (error) {
     next(error);
   }
