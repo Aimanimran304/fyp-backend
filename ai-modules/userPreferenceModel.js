@@ -1,33 +1,56 @@
-const Order = require("../models/Order");
-const MenuItem = require("../models/MenuItem");
+// 📁 ai-modules/userPreferenceModel.js
+
+import Order from "../models/Order.js";
 
 /**
- * Analyze user preferences based on past orders
- * @param {String} userId
- * @returns {Array} top categories/items
+ * 🧠 Enhanced User Preference Model
+ * Calculates:
+ * 1. Item frequency score
+ * 2. Category preference score
+ * 3. Total interaction weight
  */
-const analyzeUserPreferences = async (userId) => {
-  // Step 1: Fetch all orders of the user
-  const orders = await Order.find({ user: userId }).populate("items.menuItem");
 
-  // Step 2: Count frequency of each menu item
-  const itemFrequency = {};
-  orders.forEach((order) => {
-    order.items.forEach(({ menuItem }) => {
-      if (!menuItem) return; // just in case
-      itemFrequency[menuItem._id] = (itemFrequency[menuItem._id] || 0) + 1;
+const calculateUserPreference = async (userId) => {
+  try {
+    const orders = await Order.find({ user: userId })
+      .populate("items.menuItemId");
+
+    const itemScore = {};
+    const categoryScore = {};
+    let totalOrders = 0;
+
+    orders.forEach(order => {
+      totalOrders++;
+
+      order.items.forEach(item => {
+        const menuItem = item.menuItemId;
+
+        // Item frequency
+        if (!itemScore[menuItem.name]) {
+          itemScore[menuItem.name] = 1;
+        } else {
+          itemScore[menuItem.name]++;
+        }
+
+        // Category frequency
+        if (!categoryScore[menuItem.category]) {
+          categoryScore[menuItem.category] = 1;
+        } else {
+          categoryScore[menuItem.category]++;
+        }
+      });
     });
-  });
 
-  // Step 3: Sort items by frequency (descending)
-  const sortedItems = Object.entries(itemFrequency)
-    .sort((a, b) => b[1] - a[1])
-    .map(([itemId]) => itemId);
+    return {
+      totalOrders,
+      itemScore,
+      categoryScore
+    };
 
-  // Step 4: Fetch menu item details
-  const topItems = await MenuItem.find({ _id: { $in: sortedItems } });
-
-  return topItems;
+  } catch (error) {
+    console.error("User Preference Model Error:", error.message);
+    throw new Error("Failed to calculate user preferences");
+  }
 };
 
-module.exports = { analyzeUserPreferences };
+export default calculateUserPreference;

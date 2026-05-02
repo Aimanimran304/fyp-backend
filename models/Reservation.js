@@ -2,43 +2,42 @@ import mongoose from "mongoose";
 
 const reservationSchema = new mongoose.Schema(
   {
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
-
-    reservationDate: {
-      type: Date,
-      required: true,
-    },
-
-    reservationTime: {
+    guestName: {
       type: String,
       required: true,
-      // example: "7:30 PM"
     },
-
-    numberOfGuests: {
+    guests: {
       type: Number,
       required: true,
-      min: 1,
     },
-
+    tableNumber: {
+      type: String,
+      required: true,
+    },
+    date: {
+      type: String,
+      required: true,
+    },
+    time: {
+      type: String,
+      required: true,
+    },
+    area: {
+      type: String,
+      default: "",
+    },
+    specialRequest: {
+      type: String,
+      default: "",
+    },
     status: {
       type: String,
-      enum: ["pending", "confirmed", "cancelled"],
-      default: "pending",
+      // ✅ "pending" add kiya — pehle missing tha, isliye actions kaam nahi kar rahe the
+      enum: ["pending", "confirmed", "cancelled", "completed", "rejected"],
+      default: "confirmed",
     },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-const Reservation = mongoose.model(
-  "Reservation",
-  reservationSchema
-);
-
-export default Reservation;
+export default mongoose.model("Reservation", reservationSchema);

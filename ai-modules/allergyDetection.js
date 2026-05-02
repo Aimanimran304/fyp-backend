@@ -1,33 +1,54 @@
-const MenuItem = require("../models/MenuItem");
-const AllergyProfile = require("../models/AllergyProfile");
+// 📁 ai-modules/allergyDetection.js
+
+import AllergyProfile from "../models/AllergyProfile.js";
 
 /**
- * Check if a menu item is safe for a user
- * @param {String} userId
- * @param {String} menuItemId
- * @returns {Object} { safe: Boolean, allergens: Array }
+ * 🛡 Allergy Detection System
+ * This function:
+ * 1. Gets user's allergy profile
+ * 2. Matches it with menu item allergens
+ * 3. Returns safety status
  */
-const checkAllergy = async (userId, menuItemId) => {
-  // Step 1: Fetch user allergy profile
-  const allergyProfile = await AllergyProfile.findOne({ user: userId });
-  const allergicIngredients = allergyProfile ? allergyProfile.ingredients : [];
 
-  // Step 2: Fetch menu item
-  const menuItem = await MenuItem.findById(menuItemId);
-  if (!menuItem) {
-    throw new Error("Menu item not found");
+const checkAllergy = async (userId, menuItem) => {
+  try {
+
+    // 1️⃣ Get user's allergy profile
+    const profile = await AllergyProfile.findOne({ user: userId });
+
+    // If no allergy profile → food is safe
+    if (!profile) {
+      return {
+        safe: true,
+        message: "No allergy profile found. Item is safe."
+      };
+    }
+
+    const userAllergies = profile.allergies || [];
+
+    // 2️⃣ Match allergens
+    const matchedAllergens = menuItem.allergens.filter(allergen =>
+      userAllergies.includes(allergen)
+    );
+
+    // 3️⃣ If matched → return warning
+    if (matchedAllergens.length > 0) {
+      return {
+        safe: false,
+        message: `Warning! This item contains: ${matchedAllergens.join(", ")}`
+      };
+    }
+
+    // If no match → safe
+    return {
+      safe: true,
+      message: "Item is safe to order."
+    };
+
+  } catch (error) {
+    console.error("Allergy Detection Error:", error.message);
+    throw new Error("Failed to check allergies");
   }
-
-  // Step 3: Compare ingredients with allergies
-  const allergensFound = menuItem.ingredients.filter((ing) =>
-    allergicIngredients.includes(ing)
-  );
-
-  // Step 4: Return result
-  return {
-    safe: allergensFound.length === 0,
-    allergens: allergensFound,
-  };
 };
 
-module.exports = { checkAllergy };
+export default checkAllergy;

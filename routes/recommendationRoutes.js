@@ -1,15 +1,13 @@
-// Routes for AI-based food recommendations
 import express from "express";
-import authMiddleware from "../middleware/authMiddleware.js";
-import { getRecommendations } from "../controllers/recommendationController.js";
+import { getRecommendations, cartHealthCheck } from "../controllers/recommendationController.js";
+import protect from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-/*
-  @route   GET /api/recommendations
-  @desc    Get AI-based food recommendations for logged-in user
-  @access  Private (Customer)
-*/
-router.get("/", authMiddleware, getRecommendations);
+// GET /api/recommendations — fetch personalized recommendations
+router.get("/", protect, getRecommendations);
+
+// POST /api/recommendations/cart-check — cart me item add karne se pehle check
+router.post("/cart-check", protect, cartHealthCheck);
 
 export default router;

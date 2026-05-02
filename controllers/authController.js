@@ -1,75 +1,77 @@
-import User from "../models/User.js";
 import bcrypt from "bcryptjs";
-import generateToken from "../utils/generateToken.js";
+import jwt    from "jsonwebtoken";
+import User   from "../models/User.js";
 
-// ================= REGISTER =================
-export const registerUser = async (req, res, next) => {
+// ─── Token helper ────────────────────────────────────────────────────────────
+const generateToken = (id) =>
+  jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: "30d" });
+
+// ─── REGISTER (customer only) ────────────────────────────────────────────────
+export const registerUser = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, phone, address } = req.body;
 
-    const normalizedEmail = email.toLowerCase();
-
-    const userExists = await User.findOne({ email: normalizedEmail });
+    const userExists = await User.findOne({ email });
     if (userExists) {
-      return res.status(400).json({ message: "User already exists" });
+      return res.status(400).json({ success: false, message: "User already exists" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await User.create({
       name,
-      email: normalizedEmail,
+      email,
       password: hashedPassword,
-      role,
+      phone,
+      address,
+      role: "customer", // ✅ hamesha customer — admin yahan se nahi banega
     });
 
     res.status(201).json({
-      message: "User registered successfully",
+      success: true,
+      message: "Registered successfully",
       token: generateToken(user._id),
-      user,
+      user: {
+        id:    user._id,
+        name:  user.name,
+        email: user.email,
+        role:  user.role,
+      },
     });
   } catch (error) {
-    next(error);
+    console.error("Register error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
-// ================= LOGIN =================
-export const loginUser = async (req, res, next) => {
+// ─── LOGIN (customer only) ───────────────────────────────────────────────────
+export const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const normalizedEmail = email.toLowerCase();
-
-    // 🔥 VERY IMPORTANT LINE
-    const user = await User.findOne({ email: normalizedEmail }).select("+password");
-
+    // ✅ role: "customer" check — admin is route se login nahi kar sakta
+    const user = await User.findOne({ email, role: "customer" });
     if (!user) {
-      return res.status(401).json({ message: "Invalid email or password" });
+      return res.status(401).json({ success: false, message: "Invalid email or password" });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
-
     if (!isMatch) {
-      return res.status(401).json({ message: "Invalid email or password" });
+      return res.status(401).json({ success: false, message: "Invalid email or password" });
     }
 
-    res.status(200).json({
-      message: "Login successful",
+    res.json({
+      success: true,
       token: generateToken(user._id),
-      user,
+      user: {
+        id:    user._id,
+        name:  user.name,
+        email: user.email,
+        role:  user.role,
+      },
     });
   } catch (error) {
-    next(error);
-  }
-};
-
-// ================= PROFILE =================
-export const getProfile = async (req, res, next) => {
-  try {
-    const user = await User.findById(req.user._id).select("-password");
-
-    res.status(200).json(user);
-  } catch (error) {
-    next(error);
+    console.error("Login error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 };

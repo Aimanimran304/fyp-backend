@@ -1,10 +1,11 @@
 import express from "express";
-
 import {
   createReservation,
-  getMyReservations,
-  getAllReservations,
-  updateReservationStatus,
+  getReservations,
+  getTables,
+  deleteReservation,
+  updateReservationStatus,  // NEW
+  getReservationStats,      // NEW
 } from "../controllers/reservationController.js";
 
 import authMiddleware from "../middleware/authMiddleware.js";
@@ -12,52 +13,14 @@ import roleMiddleware from "../middleware/roleMiddleware.js";
 
 const router = express.Router();
 
-/*
-  @route   POST /api/reservations
-  @desc    Create table reservation
-  @access  Customer
-*/
-router.post(
-  "/",
-  authMiddleware,
-  roleMiddleware("Customer"),
-  createReservation
-);
+// ── User / Public routes (same as before) ────────────────────────
+router.post("/create",  createReservation);
+router.get("/tables",   getTables);
 
-/*
-  @route   GET /api/reservations/my
-  @desc    Get logged-in user's reservations
-  @access  Customer
-*/
-router.get(
-  "/my",
-  authMiddleware,
-  roleMiddleware("Customer"),
-  getMyReservations
-);
-
-/*
-  @route   GET /api/reservations
-  @desc    Get all reservations
-  @access  Admin, Staff
-*/
-router.get(
-  "/",
-  authMiddleware,
-  roleMiddleware("Admin", "Staff"),
-  getAllReservations
-);
-
-/*
-  @route   PUT /api/reservations/:id
-  @desc    Update reservation status
-  @access  Admin, Staff
-*/
-router.put(
-  "/:id",
-  authMiddleware,
-  roleMiddleware("Admin", "Staff"),
-  updateReservationStatus
-);
+// ── Admin routes (NEW) ────────────────────────────────────────────
+router.get(   "/",            authMiddleware, roleMiddleware("admin"), getReservations);
+router.get(   "/stats",       authMiddleware, roleMiddleware("admin"), getReservationStats);
+router.put(   "/:id/status",  authMiddleware, roleMiddleware("admin"), updateReservationStatus);
+router.delete("/:id",         authMiddleware, roleMiddleware("admin"), deleteReservation);
 
 export default router;

@@ -1,7 +1,8 @@
-import jwt from "jsonwebtoken";
+import jwt  from "jsonwebtoken";
 import User from "../models/User.js";
 
-const authMiddleware = async (req, res, next) => {
+// ─── PROTECT — token verify karo ─────────────────────────────────────────────
+export const protect = async (req, res, next) => {
   let token;
 
   if (
@@ -17,17 +18,23 @@ const authMiddleware = async (req, res, next) => {
 
       next();
     } catch (error) {
-      return res.status(401).json({
-        message: "Not authorized, invalid token",
-      });
+      return res.status(401).json({ success: false, message: "Not authorized" });
     }
   }
 
   if (!token) {
-    return res.status(401).json({
-      message: "Not authorized, token missing",
-    });
+    return res.status(401).json({ success: false, message: "No token" });
   }
 };
 
-export default authMiddleware;
+// ─── IS ADMIN — role check karo ──────────────────────────────────────────────
+export const isAdmin = (req, res, next) => {
+  if (req.user && req.user.role === "admin") {
+    next();
+  } else {
+    return res.status(403).json({ success: false, message: "Admin access only" });
+  }
+};
+
+// ─── Default export (purani files jo `import authMiddleware from` use karti hain)
+export default protect;

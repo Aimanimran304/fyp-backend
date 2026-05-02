@@ -4,31 +4,45 @@ const userSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: true,
-    },
-    email: {
-      type: String,
-      required: true,
-      unique: true,
-      lowercase: true,   // 🔥 important
+      required: [true, "Full name is required"],
       trim: true,
     },
+
+    email: {
+      type: String,
+      required: [true, "Email is required"],
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
+
     password: {
       type: String,
-      required: true,
-      select: false,     // 🔥 security
+      required: [true, "Password is required"],
+      minlength: 8,
     },
-    role: {
+
+    phone: {
       type: String,
-      enum: ["Admin", "Customer", "Chef"],
-      default: "Customer",
+      trim: true,
     },
-    allergyProfile: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "AllergyProfile",
+
+    address: {
+      type: String,
+      trim: true,
+    },
+
+   role: {
+      type: String,
+      enum: ["customer", "admin"],
+      default: "customer",
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
-export default mongoose.model("User", userSchema);
+const User = mongoose.model("User", userSchema);
+
+export default User;
