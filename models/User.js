@@ -32,10 +32,22 @@ const userSchema = new mongoose.Schema(
       trim: true,
     },
 
-   role: {
+    role: {
       type: String,
       enum: ["customer", "admin"],
       default: "customer",
+    },
+
+    // ─── Forget Password fields ──────────────────────────────────
+    resetOtp: {
+      type: String,
+      default: null,
+      select: false, // normal query mein nahi aayega, security k liye
+    },
+    resetOtpExpiry: {
+      type: Date,
+      default: null,
+      select: false,
     },
   },
   {

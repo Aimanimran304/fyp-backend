@@ -4,6 +4,7 @@ import User        from "../models/User.js";
 import Order       from "../models/Order.js";
 import MenuItem    from "../models/MenuItem.js";
 import Reservation from "../models/Reservation.js";
+import HealthProfile from "../models/HealthProfile.js";
 
 // ════════════════════════════════════════════
 // ADMIN AUTH
@@ -305,6 +306,26 @@ export const deleteUser = async (req, res) => {
     await User.findByIdAndDelete(req.params.id);
     res.json({ success: true, message: "User deleted" });
   } catch (err) {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// ─── GET USER HEALTH PROFILE (admin) ─────────────────────────────────────────
+export const getUserHealthProfile = async (req, res) => {
+  try {
+    const profile = await HealthProfile.findOne({ user: req.params.id });
+
+    if (!profile) {
+      return res.status(200).json({
+        success: true,
+        profile: null,
+        message: "No health profile found for this user",
+      });
+    }
+
+    res.json({ success: true, profile });
+  } catch (err) {
+    console.error("Get user health profile error:", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };

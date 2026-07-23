@@ -69,14 +69,21 @@ export const placeOrder = async (req, res) => {
 };
 
 // ── Get My Orders ──────────────────────────────────────────────
+// orderController.js mein getMyOrders function:
+
 export const getMyOrders = async (req, res) => {
   try {
+    console.log("User ID:", req.user._id); // 🔥 Debug
+    
     const orders = await Order.find({ user: req.user._id })
       .sort({ createdAt: -1 })
       .limit(20);
-
+    
+    console.log("Found orders:", orders.length); // 🔥 Debug
+    
     res.json({ success: true, orders });
   } catch (err) {
+    console.error("Get orders error:", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
