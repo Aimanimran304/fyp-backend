@@ -1,10 +1,12 @@
 import Reservation from "../models/Reservation.js";
 import Table from "../models/Table.js";
 
-// ─── Create Reservation ───────────────────────────────────────────
+const todayStr = () => new Date().toISOString().split("T")[0];
+
+// ─── Create Reservation — POST /api/reservations/create ──────────
 export const createReservation = async (req, res) => {
   try {
-    const { guestName, guests, tableNumber, date, time, area, specialRequest } = req.body;
+    const { user, guestName, guests, tableNumber, date, time, area, specialRequest } = req.body;
 
     const missing = [];
     if (!guestName)   missing.push("guestName");
@@ -36,10 +38,16 @@ export const createReservation = async (req, res) => {
       area:           area           || "",
       specialRequest: specialRequest || "",
       status:         "confirmed",
+      user:           user || null, // 🆕 matches your Step3 fix — sent directly in the body
     });
 
     await reservation.save();
-    await Table.findOneAndUpdate({ tableNumber }, { status: "occupied" });
+
+    // 🔧 FIX: only touch the table if the reservation is for TODAY —
+    // booking now for tomorrow must not block today's walk-ins.
+    if (date === todayStr()) {
+      await Table.findOneAndUpdate({ tableNumber }, { status: "reserved" });
+    }
 
     res.status(201).json(reservation);
   } catch (error) {
@@ -48,7 +56,7 @@ export const createReservation = async (req, res) => {
   }
 };
 
-// ─── Get All Reservations (Admin) ─────────────────────────────────
+// ─── Get All Reservations — GET /api/reservations (Admin) ────────
 export const getReservations = async (req, res) => {
   try {
     const { status, area, date } = req.query;
@@ -65,34 +73,57 @@ export const getReservations = async (req, res) => {
   }
 };
 
-// ─── Update Reservation Status (Admin) ───────────────────────────
+// ─── 🆕 Get My Reservations — GET /api/reservations/mine (Customer, JWT) ──
+// Kept for if/when you add token auth to the reservation flow — works
+// off the same `user` field. Not required for the polling fix below.
+export const getMyReservations = async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: "Please log in to view your reservations" });
+    const reservations = await Reservation.find({ user: req.user._id }).sort({ createdAt: -1 });
+    res.json(reservations);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ─── 🆕 Get Single Reservation — GET /api/reservations/:id ────────
+// Public (reservation IDs are unguessable Mongo ObjectIds, same trust
+// model your app already uses for /create and /tables). This is what
+// Step4 polls so a cancellation made in the Admin panel shows up on
+// the customer's already-open success page, instead of only their
+// stale localStorage cache.
+export const getReservationById = async (req, res) => {
+  try {
+    const reservation = await Reservation.findById(req.params.id);
+    if (!reservation) return res.status(404).json({ message: "Reservation not found" });
+    res.json(reservation);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ─── Update Reservation Status — PUT /:id/status (Admin only) ────
 export const updateReservationStatus = async (req, res) => {
   try {
     const { id }     = req.params;
-    const { status } = req.body;
+    const { status, reason } = req.body;
 
     const validStatuses = ["pending", "confirmed", "rejected", "cancelled", "completed"];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ message: `Invalid status. Valid: ${validStatuses.join(", ")}` });
     }
 
-    const reservation = await Reservation.findByIdAndUpdate(
-      id,
-      { status },
-      { new: true }
-    );
+    const update = { status };
+    if (["rejected", "cancelled"].includes(status)) {
+      update.cancelReason = reason || "";
+    }
 
+    const reservation = await Reservation.findByIdAndUpdate(id, update, { new: true });
     if (!reservation) {
       return res.status(404).json({ message: "Reservation not found" });
     }
 
-    // Table status update
-    if (status === "rejected" || status === "cancelled") {
-      await Table.findOneAndUpdate({ tableNumber: reservation.tableNumber }, { status: "available" });
-    }
-    if (status === "confirmed") {
-      await Table.findOneAndUpdate({ tableNumber: reservation.tableNumber }, { status: "occupied" });
-    }
+    await syncTableForReservation(reservation, status);
 
     res.json({ message: `Reservation ${status} successfully`, reservation });
   } catch (error) {
@@ -100,7 +131,57 @@ export const updateReservationStatus = async (req, res) => {
   }
 };
 
-// ─── Delete Reservation ───────────────────────────────────────────
+// ─── 🆕 Cancel My Reservation — PUT /api/reservations/:id/cancel ──
+// Customer-safe version — your /:id/status route is admin-only, so
+// the "Cancel Booking" button can't use it. This checks ownership by
+// comparing the userId in the request body against the reservation's
+// stored `user` field (same trust model as createReservation — no JWT
+// required, matching how the rest of this flow already works).
+export const cancelMyReservation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId, reason } = req.body;
+
+    const reservation = await Reservation.findById(id);
+    if (!reservation) return res.status(404).json({ message: "Reservation not found" });
+
+    if (!reservation.user || !userId || reservation.user.toString() !== String(userId)) {
+      return res.status(403).json({ message: "You can only cancel your own reservations" });
+    }
+    if (["cancelled", "rejected", "completed"].includes(reservation.status)) {
+      return res.status(400).json({ message: `This reservation is already ${reservation.status}` });
+    }
+
+    reservation.status = "cancelled";
+    reservation.cancelReason = reason || "Cancelled by customer";
+    await reservation.save();
+
+    await syncTableForReservation(reservation, "cancelled");
+
+    res.json({ message: "Reservation cancelled successfully", reservation });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ── Shared table-sync logic used by both status-update paths ──────
+async function syncTableForReservation(reservation, status) {
+  const table = await Table.findOne({ tableNumber: reservation.tableNumber });
+  if (!table) return;
+
+  if (status === "confirmed" && reservation.date === todayStr()) {
+    table.status = "reserved";
+    await table.save();
+  } else if (["rejected", "cancelled", "completed"].includes(status)) {
+    if (table.status === "reserved") {
+      table.status = "available";
+      table.customerName = "";
+      await table.save();
+    }
+  }
+}
+
+// ─── Delete Reservation — DELETE /:id (Admin) ─────────────────────
 export const deleteReservation = async (req, res) => {
   try {
     const { id } = req.params;
@@ -110,10 +191,12 @@ export const deleteReservation = async (req, res) => {
       return res.status(404).json({ message: "Reservation not found" });
     }
 
-    await Table.findOneAndUpdate(
-      { tableNumber: reservation.tableNumber },
-      { status: "available" }
-    );
+    const table = await Table.findOne({ tableNumber: reservation.tableNumber });
+    if (table && table.status === "reserved") {
+      table.status = "available";
+      table.customerName = "";
+      await table.save();
+    }
 
     res.json({ message: "Reservation deleted successfully" });
   } catch (error) {
@@ -121,7 +204,7 @@ export const deleteReservation = async (req, res) => {
   }
 };
 
-// ─── Get Tables by Area ───────────────────────────────────────────
+// ─── Get Tables by Area — GET /tables ─────────────────────────────
 export const getTables = async (req, res) => {
   try {
     const { area } = req.query;
@@ -133,10 +216,10 @@ export const getTables = async (req, res) => {
   }
 };
 
-// ─── Get Reservation Stats (Admin Dashboard) ──────────────────────
+// ─── Get Reservation Stats — GET /stats (Admin) ───────────────────
 export const getReservationStats = async (req, res) => {
   try {
-    const today = new Date().toISOString().split("T")[0];
+    const today = todayStr();
 
     const [total, pending, confirmed, todayCount, totalGuests] = await Promise.all([
       Reservation.countDocuments(),

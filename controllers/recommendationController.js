@@ -1,7 +1,12 @@
 import MenuItem from "../models/MenuItem.js";
 import HealthProfile from "../models/HealthProfile.js";
 
-// ─── Score an item against health profile ────────────────────────
+const ML_API_URL = process.env.ML_API_URL || "http://127.0.0.1:8001";
+const ML_TIMEOUT_MS = 4000; // don't hang the request if the ML service is down
+
+// ─── Score an item against health profile (RULE-BASED FALLBACK) ───
+// Kept as-is. Used only if the ML service is unreachable/slow, so the
+// feature never fully breaks (e.g. during your FYP demo).
 function scoreItem(item, profile) {
   let score = 0;
   const reasons = [];
@@ -19,21 +24,18 @@ function scoreItem(item, profile) {
   );
   const diet = (profile.dietaryPreference || "").toLowerCase();
 
-  // ── Hard disqualifiers (allergy match) ──────────────────────────
   const itemAllergens = (item.allergens || []).map((a) => a.toLowerCase());
   const allergyMatch = itemAllergens.some((a) =>
     allergies.some((ua) => ua.includes(a) || a.includes(ua))
   );
   if (allergyMatch) return { score: -999, reasons, warnings: ["contains allergen"] };
 
-  // ── Disease-based notRecommendedFor check ───────────────────────
   const notRec = (item.notRecommendedFor || []).map((d) => d.toLowerCase());
   const diseaseConflict = diseases.some((d) =>
     notRec.some((nr) => nr.includes(d) || d.includes(nr))
   );
   if (diseaseConflict) return { score: -999, reasons: [], warnings: ["not recommended for your condition"] };
 
-  // ── Disease-based recommendedFor boost ──────────────────────────
   const recFor = (item.recommendedFor || []).map((r) => r.toLowerCase());
   const diseaseMatch = diseases.some((d) =>
     recFor.some((r) => r.includes(d) || d.includes(r))
@@ -43,7 +45,6 @@ function scoreItem(item, profile) {
     reasons.push("suitable for your condition");
   }
 
-  // ── Health tags vs restrictions ──────────────────────────────────
   const tags = (item.healthTags || []).map((t) => t.toLowerCase());
 
   if (restrictions.includes("low sugar") || diseases.includes("diabetes")) {
@@ -79,13 +80,11 @@ function scoreItem(item, profile) {
     else { score -= 30; }
   }
 
-  // ── Dietary preference ──────────────────────────────────────────
   if (diet === "vegetarian" && !item.isVegetarian) { score -= 50; }
   if (diet === "vegan" && !item.isVegan) { score -= 50; }
   if (diet === "vegetarian" && item.isVegetarian) { score += 15; reasons.push("vegetarian"); }
   if (diet === "vegan" && item.isVegan) { score += 15; reasons.push("vegan"); }
 
-  // ── Health goals ─────────────────────────────────────────────────
   if (goals.some(g => g.includes("weight loss"))) {
     const cal = item.calories || 999;
     if (cal < 300) { score += 20; reasons.push("low calorie"); }
@@ -97,11 +96,9 @@ function scoreItem(item, profile) {
     if (tags.includes("heart-healthy")) { score += 25; reasons.push("heart healthy"); }
   }
 
-  // ── Health tags bonus ────────────────────────────────────────────
   if (tags.includes("grilled")) { score += 5; }
   if (tags.includes("antioxidant")) { score += 5; }
 
-  // ── Calorie cap based on BMI (if height & weight provided) ──────
   if (profile.height && profile.weight) {
     const bmi = profile.weight / Math.pow(profile.height / 100, 2);
     if (bmi > 30 && (item.calories || 0) > 500) {
@@ -110,10 +107,91 @@ function scoreItem(item, profile) {
     }
   }
 
-  // ── Base score from rating ───────────────────────────────────────
   score += (item.rating || 0) * 2;
 
   return { score, reasons: [...new Set(reasons)], warnings: [...new Set(warnings)] };
+}
+
+function ruleBasedRecommendations(allItems, profile) {
+  const scored = allItems
+    .map((item) => {
+      const { score, reasons, warnings } = scoreItem(item.toObject(), profile);
+      return { item, score, reasons, warnings };
+    })
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return scored.map(({ item, reasons, warnings }) => ({
+    ...item.toObject(),
+    _recommendReasons: reasons,
+    _recommendWarnings: warnings,
+  }));
+}
+
+// ─── Call the ML FastAPI service ───────────────────────────────────
+async function getMlRecommendations(allItems, profile) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ML_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(`${ML_API_URL}/recommend`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        profile: {
+          age: profile.age,
+          gender: profile.gender,
+          height: profile.height,
+          weight: profile.weight,
+          diseases: profile.diseases || [],
+          allergies: profile.allergies || [],
+          otherAllergies: profile.otherAllergies || [],
+          medicineAllergies: profile.medicineAllergies || [],
+          dietaryPreference: profile.dietaryPreference || "",
+          dietaryRestrictions: profile.dietaryRestrictions || [],
+          healthGoals: profile.healthGoals || [],
+        },
+        items: allItems.map((i) => ({
+          id: i._id.toString(),
+          name: i.name,
+          calories: i.calories,
+          nutrition: i.nutrition,
+          allergens: i.allergens,
+          isVegetarian: i.isVegetarian,
+          isVegan: i.isVegan,
+          isGlutenFree: i.isGlutenFree,
+          isDairyFree: i.isDairyFree,
+          isSpicy: i.isSpicy,
+          rating: i.rating,
+          preparationTime: i.preparationTime,
+          notRecommendedFor: i.notRecommendedFor,
+          recommendedFor: i.recommendedFor,
+        })),
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) throw new Error(`ML service returned ${res.status}`);
+    const data = await res.json();
+
+    // map ML ids back to full menu item docs, attach verdict/confidence
+    const itemsById = new Map(allItems.map((i) => [i._id.toString(), i]));
+    const recommendations = data.recommendations
+      .map((r) => {
+        const doc = itemsById.get(r.id);
+        if (!doc) return null;
+        return {
+          ...doc.toObject(),
+          _mlVerdict: r.verdict,
+          _mlConfidence: r.confidence,
+        };
+      })
+      .filter(Boolean);
+
+    return recommendations;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 // ─── Build a short AI message ─────────────────────────────────────
@@ -146,7 +224,6 @@ export const getRecommendations = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // Check if health profile exists
     const profile = await HealthProfile.findOne({ user: userId });
 
     if (!profile) {
@@ -157,28 +234,21 @@ export const getRecommendations = async (req, res) => {
       });
     }
 
-    // Fetch all available menu items
     const allItems = await MenuItem.find({ isAvailable: true });
 
-    // Score each item
-    const scored = allItems
-      .map((item) => {
-        const { score, reasons, warnings } = scoreItem(item.toObject(), profile);
-        return { item, score, reasons, warnings };
-      })
-      .filter(({ score }) => score > 0) // Only positive-score items
-      .sort((a, b) => b.score - a.score); // Best first
+    let recommendations;
+    let usedFallback = false;
 
-    // Attach reasons/warnings to items
-    const recommendations = scored.map(({ item, reasons, warnings }) => ({
-      ...item.toObject(),
-      _recommendReasons: reasons,
-      _recommendWarnings: warnings,
-    }));
+    try {
+      recommendations = await getMlRecommendations(allItems, profile);
+    } catch (mlError) {
+      console.warn("ML service unavailable, falling back to rule engine:", mlError.message);
+      recommendations = ruleBasedRecommendations(allItems, profile.toObject());
+      usedFallback = true;
+    }
 
     const aiMessage = buildAiMessage(profile, recommendations.length);
 
-    // Profile summary for frontend tags
     const profileSummary = {
       diseases: (profile.diseases || []).filter(d => d !== "None"),
       diet: profile.dietaryPreference || "",
@@ -191,6 +261,7 @@ export const getRecommendations = async (req, res) => {
       aiMessage,
       profileSummary,
       recommendations,
+      poweredBy: usedFallback ? "rules" : "ml",
     });
   } catch (error) {
     console.error("Recommendation error:", error);
@@ -199,7 +270,9 @@ export const getRecommendations = async (req, res) => {
 };
 
 // ─── POST /api/recommendations/cart-check ─────────────────────────
-// Check karo k cart item user ki health k against hai ya nahi
+// Kept rule-based on purpose: this is a fast, hard-block safety check
+// (allergens / disease conflicts) that must never depend on a second
+// network hop to the ML service. No change needed here.
 export const cartHealthCheck = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -227,7 +300,6 @@ export const cartHealthCheck = async (req, res) => {
 
     const nutrition = item.nutrition || {};
 
-    // ── 1. Allergy check (DANGER — hard block) ──────────────────
     const itemAllergens = (item.allergens || []).map((a) => a.toLowerCase());
     const allergyMatch = itemAllergens.some((a) =>
       allergies.some((ua) => ua.includes(a) || a.includes(ua))
@@ -241,7 +313,6 @@ export const cartHealthCheck = async (req, res) => {
       });
     }
 
-    // ── 2. notRecommendedFor field check ────────────────────────
     const notRec = (item.notRecommendedFor || []).map((d) => d.toLowerCase());
     const notRecConflict = diseases.some((d) =>
       notRec.some((nr) => nr.includes(d) || d.includes(nr))
@@ -260,10 +331,8 @@ export const cartHealthCheck = async (req, res) => {
       });
     }
 
-    // ── 3. Disease-based nutrition checks ───────────────────────
     const warningMessages = [];
 
-    // Diabetes — high sugar or high carbs
     if (diseases.some((d) => d.includes("diabetes"))) {
       if ((nutrition.sugar || 0) > 20) {
         warningMessages.push(
@@ -276,7 +345,6 @@ export const cartHealthCheck = async (req, res) => {
       }
     }
 
-    // Blood Pressure / Hypertension — high sodium
     if (
       diseases.some(
         (d) => d.includes("blood pressure") || d.includes("hypertension")
@@ -289,7 +357,6 @@ export const cartHealthCheck = async (req, res) => {
       }
     }
 
-    // Heart Disease — high fat or high sodium
     if (diseases.some((d) => d.includes("heart"))) {
       if ((nutrition.fat || 0) > 25) {
         warningMessages.push(
@@ -303,7 +370,6 @@ export const cartHealthCheck = async (req, res) => {
       }
     }
 
-    // Obesity — high calories
     if (diseases.some((d) => d.includes("obesity"))) {
       if ((item.calories || 0) > 600) {
         warningMessages.push(
@@ -312,7 +378,6 @@ export const cartHealthCheck = async (req, res) => {
       }
     }
 
-    // Kidney Disease — high sodium or high protein
     if (diseases.some((d) => d.includes("kidney"))) {
       if ((nutrition.sodium || 0) > 500) {
         warningMessages.push(
@@ -326,7 +391,6 @@ export const cartHealthCheck = async (req, res) => {
       }
     }
 
-    // Gout — high protein (purines)
     if (diseases.some((d) => d.includes("gout"))) {
       if ((nutrition.protein || 0) > 25) {
         warningMessages.push(
@@ -335,7 +399,6 @@ export const cartHealthCheck = async (req, res) => {
       }
     }
 
-    // Celiac Disease — gluten check
     if (diseases.some((d) => d.includes("celiac"))) {
       if (!item.isGlutenFree) {
         warningMessages.push(
@@ -344,7 +407,6 @@ export const cartHealthCheck = async (req, res) => {
       }
     }
 
-    // Lactose Intolerance — dairy check
     if (diseases.some((d) => d.includes("lactose"))) {
       if (!item.isDairyFree) {
         warningMessages.push(
@@ -356,13 +418,12 @@ export const cartHealthCheck = async (req, res) => {
     if (warningMessages.length > 0) {
       return res.status(200).json({
         safe: false,
-        severity: "warning", // ← warning (not danger), so "Add Anyway" button shows
+        severity: "warning",
         warnings: warningMessages,
         itemName: item.name,
       });
     }
 
-    // ── All clear ────────────────────────────────────────────────
     res.status(200).json({ safe: true, warnings: [] });
   } catch (error) {
     res.status(500).json({ message: error.message });

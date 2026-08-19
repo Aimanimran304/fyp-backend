@@ -1,5 +1,6 @@
 import Order from "../models/Order.js";
 import HealthProfile from "../models/HealthProfile.js";
+import { notify } from "../utils/notify.js";
 
 // ─── GET /api/orders/kitchen — Chef: active kitchen orders ───────
 export const getKitchenOrders = async (req, res) => {
@@ -52,6 +53,7 @@ export const getLiveOrders = async (req, res) => {
 };
 
 // ─── PATCH /api/orders/:id/status — Chef/Waiter: update status ───
+// ─── PATCH /api/orders/:id/status — Chef/Waiter: update status ───
 export const updateOrderStatus = async (req, res) => {
   try {
     const { status } = req.body;
@@ -67,9 +69,25 @@ export const updateOrderStatus = async (req, res) => {
     order.status = status;
     await order.save();
 
-    res.json({ success: true, order });
+    // 🔔 Real-time broadcast — sab dashboards (admin/chef/waiter) sun lenge
+    const populatedOrder = await Order.findById(order._id).populate("user", "name email");
+    const io = req.app.get("io");
+    io.emit("orderStatusUpdated", populatedOrder);
+
+    // 🔔 Notify waiters when the kitchen marks an order Ready
+    if (status === "ready") {
+      await notify({
+        role: "waiter",
+        type: "order_ready",
+        message: `Order for ${order.orderType === "dine-in" ? `Table ${order.tableNumber}` : order.orderType} is ready to serve`,
+        relatedOrder: order._id,
+      });
+    }
+
+    return res.json({ success: true, order: populatedOrder });
   } catch (err) {
     console.error("updateOrderStatus error:", err.message);
-    res.status(500).json({ message: "Server error", error: err.message });
+    if (res.headersSent) return;
+    return res.status(500).json({ message: "Server error", error: err.message });
   }
 };

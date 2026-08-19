@@ -1,18 +1,26 @@
 import express from "express";
-import {
-  getAlerts,
-  createAlert,
-  dismissAlert,
-} from "../controllers/waiterAlertController.js";
-import protect from "../middleware/authMiddleware.js";
+import { createAlert, getAlerts, updateAlertStatus } from "../controllers/waiterAlertController.js";
+import { createBillRequest, getMyBillRequests } from "../controllers/billRequestController.js";
+import { getMyNotifications, markNotificationRead, markAllRead } from "../controllers/notificationController.js";
+import { protect } from "../middleware/authMiddleware.js";
+import roleMiddleware from "../middleware/roleMiddleware.js";
 
 const router = express.Router();
 
-// Customer: call waiter (protect — logged in customer)
-router.post("/alerts", protect, createAlert);
+// ── Customer Assistance ──────────────────────────────────────────
+// POST is open to any logged-in role (customer calling for help, or a
+// waiter logging a request on a guest's behalf).
+router.post("/assistance",       protect, createAlert);
+router.get("/assistance",        protect, roleMiddleware(["waiter"]), getAlerts);
+router.patch("/assistance/:id",  protect, roleMiddleware(["waiter"]), updateAlertStatus);
 
-// Waiter: see + dismiss alerts
-router.get("/alerts",              protect, getAlerts);
-router.patch("/alerts/:id/dismiss",protect, dismissAlert);
+// ── Bill Requests (Waiter → Cashier handoff) ─────────────────────
+router.post("/bill-requests", protect, roleMiddleware(["waiter"]), createBillRequest);
+router.get("/bill-requests",  protect, roleMiddleware(["waiter"]), getMyBillRequests);
+
+// ── Notifications (role-scoped: waiter/chef/cashier/admin) ───────
+router.get("/notifications",             protect, getMyNotifications);
+router.patch("/notifications/:id/read",  protect, markNotificationRead);
+router.patch("/notifications/read-all",  protect, markAllRead);
 
 export default router;

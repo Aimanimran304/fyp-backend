@@ -200,6 +200,10 @@ export const updateOrderStatus = async (req, res) => {
 
     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
 
+    // 🔔 Real-time broadcast — Chef, Waiter, Admin sab ko turant pata chale
+    const io = req.app.get("io");
+    io.emit("orderStatusUpdated", order);
+
     res.json({ success: true, order });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error" });

@@ -19,5 +19,5 @@ const importData = async () => {
     process.exit(1);
   }
 };
-
+n
 importData();

@@ -2,6 +2,7 @@ import Order    from "../models/Order.js";
 import MenuItem from "../models/MenuItem.js";
 
 // ── Place Order ────────────────────────────────────────────────
+// ── Place Order ────────────────────────────────────────────────
 export const placeOrder = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -15,12 +16,10 @@ export const placeOrder = async (req, res) => {
       specialInstructions,
     } = req.body;
 
-    // ── Validate items ──
     if (!items || items.length === 0) {
       return res.status(400).json({ success: false, message: "Cart is empty" });
     }
 
-    // ── Validate orderType specific fields ──
     if (orderType === "delivery" && !deliveryAddress?.street) {
       return res.status(400).json({ success: false, message: "Delivery address is required" });
     }
@@ -28,13 +27,11 @@ export const placeOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: "Table number is required" });
     }
 
-    // ── Calculate pricing ──
     const subtotal    = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
     const deliveryFee = orderType === "delivery" ? 150 : 0;
-    const tax         = Math.round(subtotal * 0.05); // 5% tax
+    const tax         = Math.round(subtotal * 0.05);
     const totalAmount = subtotal + deliveryFee + tax;
 
-    // ── Estimated time ──
     const timeMap = { "delivery": 45, "takeaway": 20, "dine-in": 25 };
     const estimatedTime = timeMap[orderType] || 30;
 
@@ -55,6 +52,11 @@ export const placeOrder = async (req, res) => {
       status:        "placed",
       paymentStatus: paymentMethod === "cash" ? "pending" : "pending",
     });
+
+    // 🔔 Naya order Chef/Waiter/Admin ko turant dikhao
+    const populatedOrder = await Order.findById(order._id).populate("user", "name email phone");
+    const io = req.app.get("io");
+    io.emit("newOrder", populatedOrder);
 
     res.status(201).json({
       success: true,

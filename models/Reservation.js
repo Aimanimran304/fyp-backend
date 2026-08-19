@@ -2,6 +2,11 @@ import mongoose from "mongoose";
 
 const reservationSchema = new mongoose.Schema(
   {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
     guestName: {
       type: String,
       required: true,
@@ -32,7 +37,6 @@ const reservationSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      // ✅ "pending" add kiya — pehle missing tha, isliye actions kaam nahi kar rahe the
       enum: ["pending", "confirmed", "cancelled", "completed", "rejected"],
       default: "confirmed",
     },
